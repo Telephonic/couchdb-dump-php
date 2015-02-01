@@ -3,7 +3,7 @@
 ini_set('memory_limit', '-1');
 fwrite(STDERR, "COUCH DB DUMPER | version: 1.2.0" . PHP_EOL);
 fwrite(STDERR, "(c) Copyright 2013, Anton Bondar <anton@zebooka.com> http://zebooka.com/soft/LICENSE/" . PHP_EOL . PHP_EOL);
-fwrite(STDERR, "(c) Copyright 2014, Updated by Miralem Mehic <miralem@mehic.info>" . PHP_EOL . PHP_EOL);
+fwrite(STDERR, "(c) Copyright 2014, Updated by Miralem Mehic <miralem@mehic.info>. Sponsored by CloudPBX Inc. <info@cloudpbx.ca>" . PHP_EOL . PHP_EOL);
 
 $help = <<<HELP
    This tool dumps available documents it can find using _all_docs request to CouchDB.
@@ -209,6 +209,7 @@ foreach ($all_docs['rows'] as $doc) {
         }
     
         $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		
  
         if ($full_doc !== null && $full_doc !== false) {
             if (!$first) {
@@ -226,7 +227,7 @@ foreach ($all_docs['rows'] as $doc) {
 
             foreach($doc_revs["_attachments"] as $attachment_id => $content){ 
 
-                $tempUrl = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . "/" . $attachment_id; 
+                $tempUrl = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . "/" . urlencode($attachment_id); 
 
                 //create folder
                 if (!file_exists('./' . $doc['id'])) 

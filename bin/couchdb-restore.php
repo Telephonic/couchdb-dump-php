@@ -3,7 +3,7 @@
 ini_set('memory_limit', '-1');
 fwrite(STDOUT,  "COUCH DB RESTORER | version: 1.0.0" . PHP_EOL);
 fwrite(STDOUT,  "(c) Copyright 2013, Anton Bondar <anton@zebooka.com> http://zebooka.com/soft/LICENSE/" . PHP_EOL . PHP_EOL);
-fwrite(STDOUT,  "(c) Copyright 2014, Updated by Miralem Mehic <miralem@mehic.info>" . PHP_EOL . PHP_EOL);
+fwrite(STDOUT,  "(c) Copyright 2014, Updated by Miralem Mehic <miralem@mehic.info>. Sponsored by CloudPBX Inc. <info@cloudpbx.ca>" . PHP_EOL . PHP_EOL);
 
 $help = <<<HELP
    This tool restores provided JSON dump using _bulk_docs feature in CouchDB.
@@ -123,15 +123,18 @@ $fileContent = file_get_contents($filename);
 $decodedContent = json_decode($fileContent);
  
 fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING STARTED <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL); 
+  
+
 foreach($decodedContent->docs as $documentTemp){ 
 
-    $documentTemp = (array)$documentTemp;  
+    $documentTemp = (array)$documentTemp; 
 
     //so we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
-    $url = "http://{$host}:{$port}/{$database}/" . $documentTemp["_id"]; 
+    $url = "http://{$host}:{$port}/{$database}/" . urlencode($documentTemp["_id"]); 
     $curl = getCommonCurl($url);
     $result = trim(curl_exec($curl));
     $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
 
     if($statusCode == 200){
         $result = json_decode($result,true); 
@@ -141,8 +144,8 @@ foreach($decodedContent->docs as $documentTemp){
 
     if(isset($documentTemp["_revisions"]))
         unset($documentTemp["_revisions"]);
-    
-    $url = "http://{$host}:{$port}/{$database}/" . $documentTemp["_id"];
+
+    $url = "http://{$host}:{$port}/{$database}/" . urlencode($documentTemp["_id"]);
 
     fwrite(STDOUT,  "Restoring '{$documentTemp['_id']}|rev:{$documentTemp['_rev']}' into db '{$database}' at {$host}:{$port}.." . PHP_EOL);
 
@@ -151,7 +154,20 @@ foreach($decodedContent->docs as $documentTemp){
         unset($documentTemp["_attachments"]); 
         unset($documentTemp["unnamed"]);  
     }
- 
+
+    /*
+    $documentTemp["_id"] =  str_replace("+", "%2B", $documentTemp["_id"]); 
+
+    
+    foreach($documentTemp as $key=>$val){
+        $documentTemp[$key] =  str_replace(
+            array("+",   "{", "}"), 
+            array("%2B", "%7B", "%7D"), 
+            $val
+        ); 
+    }
+    */
+
     $curl = getCommonCurl($url); 
     curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT'); /* or PUT */
     curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($documentTemp));
@@ -164,6 +180,8 @@ foreach($decodedContent->docs as $documentTemp){
     // TODO: use next string when get ideas why it is not working and how to fix it.
     //curl_setopt($curl, CURLOPT_INFILE, $filehandle); // strange, but this does not work
     $result = trim(curl_exec($curl));
+
+
  
     //fclose($filehandle);
     $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);

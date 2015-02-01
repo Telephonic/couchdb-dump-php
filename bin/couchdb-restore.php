@@ -154,20 +154,7 @@ foreach($decodedContent->docs as $documentTemp){
         unset($documentTemp["_attachments"]); 
         unset($documentTemp["unnamed"]);  
     }
-
-    /*
-    $documentTemp["_id"] =  str_replace("+", "%2B", $documentTemp["_id"]); 
-
-    
-    foreach($documentTemp as $key=>$val){
-        $documentTemp[$key] =  str_replace(
-            array("+",   "{", "}"), 
-            array("%2B", "%7B", "%7D"), 
-            $val
-        ); 
-    }
-    */
-
+ 
     $curl = getCommonCurl($url); 
     curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT'); /* or PUT */
     curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($documentTemp));

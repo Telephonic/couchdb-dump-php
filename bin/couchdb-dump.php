@@ -96,7 +96,8 @@ if (!$noHistory) {
 $first = true;
 $count = count($all_docs['rows']);
 fwrite(STDERR, "Found {$count} documents..." . PHP_EOL);
-  
+ 
+   
 foreach ($all_docs['rows'] as $doc) {
   
     // foreach DOC get all revs
@@ -105,7 +106,6 @@ foreach ($all_docs['rows'] as $doc) {
     } else {  
         $url = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . (($inlineAttachment || $binaryAttachments) ? "?attachments=true" : "");
     }
- 
 
     fwrite(STDERR, "[{$doc['id']}]");
  
@@ -123,8 +123,9 @@ foreach ($all_docs['rows'] as $doc) {
     curl_close($curl);
 
     if (200 == $statusCode) {
-       $doc_revs = json_decode($result, true);
-
+      
+       $doc_revs = json_decode($result);
+       $doc_revs = (array)$doc_revs;
 
     } else {
         // unknown status
@@ -132,9 +133,12 @@ foreach ($all_docs['rows'] as $doc) {
         exit(2);
     }
     if (isset($doc_revs['_revs_info']) && count($doc_revs['_revs_info']) > 1) {
+
+        $revs_info = toArray($doc_revs["_revs_info"]);
+
         fwrite(STDERR, "" . PHP_EOL);
         // we have more than one revision
-        $revs_info = array_reverse($doc_revs['_revs_info']);
+        $revs_info = array_reverse( $revs_info );
         $lastRev = end($revs_info);
         $lastRev = $lastRev['rev'];
         reset($revs_info);
@@ -207,9 +211,10 @@ foreach ($all_docs['rows'] as $doc) {
                 unset($doc_revs["_attachments"][$key]["data"]);
             } 
         }
-    
+ 
+
         $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-		
+ 		
  
         if ($full_doc !== null && $full_doc !== false) {
             if (!$first) {
@@ -262,6 +267,29 @@ function getCommonCurl($url)
     curl_setopt($curl, CURLOPT_BINARYTRANSFER, 1);
     curl_setopt($curl, CURLOPT_URL, $url);
     return $curl;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Convert incoming object to array (deep inspection, recursive function)
+ * @author Miralem Mehic <miralem@mehic.info>
+ * @param array $obj Incoming object 
+ * @return array
+ */
+function toArray($obj)
+{
+    if (is_object($obj)) $obj = (array)$obj;
+    if (is_array($obj)) {
+        $new = array();
+        foreach ($obj as $key => $val) {
+            $new[$key] = toArray($val);
+        }
+    } else {
+        $new = $obj;
+    }
+
+    return $new;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

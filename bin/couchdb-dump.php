@@ -18,6 +18,7 @@ OPTIONS:
    -a                 Fetch attachments inline (capture them in base64 encoded format).
    -X                 No revisions history in dump.
    -A                 Fetch attachments binary (Download them to current folder).
+   -s                 Outputs each document to separate file inside database directory in current folder (title of directory is the same as the title of database)
    -y <PHP_FILE>      Include this PHP script that returns callback/function to check if document/revision needs to be dumped.
 
 
@@ -42,8 +43,9 @@ $noHistory = isset($params['X']) ? $params['X'] : false;
 $callbackFile = isset($params['y']) ? $params['y'] : null;
 $inlineAttachment = isset($params['a']) ? $params['a'] : false; 
 $binaryAttachments = (isset($params['A']) && $noHistory) ? $params['A'] : false;
+$separateFiles = (isset($params['s'])) ? $params['s'] : false;
 $callbackFilter = null;
- 
+  
   
 if (null !== $callbackFile) {
     $callbackFilter = include $callbackFile;
@@ -132,6 +134,8 @@ foreach ($all_docs['rows'] as $doc) {
         fwrite(STDERR, "ERROR: Unsupported response when fetching document [{$doc['id']}] from db '{$database}' (http status code = {$statusCode}) " . PHP_EOL);
         exit(2);
     }
+
+    //REVISIONS
     if (isset($doc_revs['_revs_info']) && count($doc_revs['_revs_info']) > 1) {
 
         $revs_info = toArray($doc_revs["_revs_info"]);
@@ -175,17 +179,30 @@ foreach ($all_docs['rows'] as $doc) {
                 fwrite(STDERR, " = unsupported revision status" . PHP_EOL);
                 continue; // who knows :)
             }
+    
+            //IF we want to save each document in separate file
+            if($separateFiles){ 
 
-            // add document to dump
-            if (!$first) {
-                fwrite(STDOUT, ', ' . PHP_EOL . $full_doc);
-            } else {
-                fwrite(STDOUT, $full_doc);
+                if (!file_exists('./' . $database)) 
+                    mkdir('./' . $database, 0777, true);
+ 
+                $myfile = fopen("./" . $database . "/" . $doc['id'], "w");
+                fwrite($myfile, $full_doc);
+                fclose($myfile);
+
+             //Or if we want to join them together
+            }else{
+                // add document to dump
+                if (!$first) {
+                    fwrite(STDOUT, ', ' . PHP_EOL . $full_doc);
+                } else {
+                    fwrite(STDOUT, $full_doc);
+                }
+                $first = false;
             }
-            $first = false;
         }
   
-  
+    //NO REVISIONS
     } else {
        
         // we have only one revision
@@ -215,15 +232,29 @@ foreach ($all_docs['rows'] as $doc) {
 
         $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
  		
+        //IF we want to save each document in separate file
+        if($separateFiles){
+            
+            if (!file_exists('./' . $database)) 
+                mkdir('./' . $database, 0777, true);
+
+            $myfile = fopen("./" . $database . "/" . $doc['id'], "w");
+
+            fwrite($myfile, $full_doc);
+            fclose($myfile);
+
+        //Or if we want to join them together..
+        }else{
  
-        if ($full_doc !== null && $full_doc !== false) {
-            if (!$first) {
-                fwrite(STDOUT, ', ' . PHP_EOL . $full_doc);
-            } else {
-                fwrite(STDOUT, $full_doc);
-            }
-            $first = false;
-        }  
+            if ($full_doc !== null && $full_doc !== false) {
+                if (!$first) {
+                    fwrite(STDOUT, ', ' . PHP_EOL . $full_doc);
+                } else {
+                    fwrite(STDOUT, $full_doc);
+                }
+                $first = false;
+            }   
+        }
    
         /* 
         *   Binary attachments 

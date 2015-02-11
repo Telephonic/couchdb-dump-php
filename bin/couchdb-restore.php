@@ -18,6 +18,7 @@ OPTIONS:
    -D                 Drop and create database, if needed (default: create db, only if it does not exist).
    -F                 Force restore on existing db with documents.
    -a                 Restore inline attachments (from base64 encoded format).
+   -s                 Restore documents from folder that has the same title as database in current directory
 
 WARNING:
    Please note, that it is not a good idea to restore dump on existing database with documents.
@@ -41,6 +42,7 @@ $filename = isset($params['f']) ? strval($params['f']) : null;
 $inlineAttachment = isset($params['a']) ? $params['a'] : false; 
 $drop = isset($params['D']) ? strval($params['D']) : false;
 $forceRestore = isset($params['F']) ? $params['F'] : false;
+$separateFiles = isset($params['s']) ? $params['s'] : false;
 
 if ('' === $host || $port < 1 || 65535 < $port) {
     fwrite(STDOUT,  "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
@@ -52,9 +54,16 @@ if (!isset($database) || '' === $database) {
     exit(1);
 }
 
-if (!isset($filename) || !is_file($filename) || !is_readable($filename)) {
+if (!$separateFiles && (!isset($filename) || !is_file($filename) || !is_readable($filename))) {
     fwrite(STDOUT,  "ERROR: Please specify JSON file to restore (-f <FILENAME>)." . PHP_EOL);
     exit(1);
+}
+
+if($separateFiles) {
+    if(!file_exists("./$database")){
+        fwrite(STDOUT,  "ERROR: There is no folder named same as database $database" . PHP_EOL);
+        exit(1);
+    }
 }
 //$filehandle = fopen($filename, 'rb');
 //if (!$filehandle) {
@@ -118,18 +127,32 @@ if (!$exists) {
     }
 }
 
-// post dump
-$fileContent = file_get_contents($filename);
-$decodedContent = json_decode($fileContent);
+if($separateFiles){
+
+    $files = array();
+    foreach(glob("$database/*") as $file) {
+        $files[] = json_decode(file_get_contents($file), true);        
+    }
+
+    $decodedContent = new stdClass();
+    $decodedContent->new_edits = false;
+    $decodedContent->docs = $files; 
+
+
+} else {
+    // post dump
+    $fileContent = file_get_contents($filename);
+    $decodedContent = json_decode($fileContent);
+}
  
 fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING STARTED <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL); 
-  
-
+   
 foreach($decodedContent->docs as $documentTemp){ 
-
+ 
+    if(!is_array($documentTemp))
     $documentTemp = (array)$documentTemp; 
-
-    //so we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
+ 
+    //we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
     $url = "http://{$host}:{$port}/{$database}/" . urlencode($documentTemp["_id"]); 
     $curl = getCommonCurl($url);
     $result = trim(curl_exec($curl));

@@ -18,7 +18,7 @@ OPTIONS:
    -D                 Drop and create database, if needed (default: create db, only if it does not exist).
    -F                 Force restore on existing db with documents.
    -a                 Restore inline attachments (from base64 encoded format).
-   -s                 Restore documents from folder that has the same title as database in current directory
+   -s                 Specify directory from which documnest should be restored
 
 WARNING:
    Please note, that it is not a good idea to restore dump on existing database with documents.
@@ -60,7 +60,7 @@ if (!$separateFiles && (!isset($filename) || !is_file($filename) || !is_readable
 }
 
 if($separateFiles) {
-    if(!file_exists("./$database")){
+    if(!file_exists("./$separateFiles")){
         fwrite(STDOUT,  "ERROR: There is no folder named same as database $database" . PHP_EOL);
         exit(1);
     }
@@ -130,7 +130,7 @@ if (!$exists) {
 if($separateFiles){
 
     $files = array();
-    foreach(glob("$database/*") as $file) {
+    foreach(glob("$separateFiles/*") as $file) {
         $files[] = json_decode(file_get_contents($file), true);        
     }
 

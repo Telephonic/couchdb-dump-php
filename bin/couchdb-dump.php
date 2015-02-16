@@ -19,6 +19,8 @@ OPTIONS:
    -X                 No revisions history in dump.
    -A                 Fetch attachments binary (Download them to current folder).
    -s                 Outputs each document to separate file inside database directory in current folder (title of directory is the same as the title of database)
+   -t                 Used with -s to add timestamp mark to the folder
+   -P                 Pretty JSON output
    -y <PHP_FILE>      Include this PHP script that returns callback/function to check if document/revision needs to be dumped.
 
 
@@ -43,7 +45,9 @@ $noHistory = isset($params['X']) ? $params['X'] : false;
 $callbackFile = isset($params['y']) ? $params['y'] : null;
 $inlineAttachment = isset($params['a']) ? $params['a'] : false; 
 $binaryAttachments = (isset($params['A']) && $noHistory) ? $params['A'] : false;
+$prettyJsonOutput = (isset($params['P'])) ? $params['P'] : false;
 $separateFiles = (isset($params['s'])) ? $params['s'] : false;
+$timeStamp = (isset($params['t'])) ? $params['t'] : false;
 $callbackFilter = null;
   
   
@@ -139,6 +143,7 @@ foreach ($all_docs['rows'] as $doc) {
     if (isset($doc_revs['_revs_info']) && count($doc_revs['_revs_info']) > 1) {
 
         $revs_info = toArray($doc_revs["_revs_info"]);
+        $revs_info = clearEmptyKey($revs_info);
 
         fwrite(STDERR, "" . PHP_EOL);
         // we have more than one revision
@@ -179,16 +184,20 @@ foreach ($all_docs['rows'] as $doc) {
                 fwrite(STDERR, " = unsupported revision status" . PHP_EOL);
                 continue; // who knows :)
             }
-       
-            $full_doc = indent($full_doc);
+            
+            if($prettyJsonOutput)
+                $full_doc = indent($full_doc);
     
             //IF we want to save each document in separate file
             if($separateFiles){ 
 
-                if (!file_exists('./' . $database)) 
-                    mkdir('./' . $database, 0777, true);
+
+                $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
+                 
+                if (!file_exists('./' . $databaseName)) 
+                    mkdir('./' . $databaseName, 0777, true);
  
-                $myfile = fopen("./" . $database . "/" . $doc['id'] . '_rev' . $rev['rev'] . ".json", "w");
+                $myfile = fopen("./" . $databaseName . "/" . $doc['id'] . '_rev' . $rev['rev'] . ".json", "w");
                 fwrite($myfile, $full_doc);
                 fclose($myfile);
 
@@ -223,25 +232,33 @@ foreach ($all_docs['rows'] as $doc) {
         if((!$inlineAttachment && !$binaryAttachments))
             unset($doc_revs["_attachments"]);
 
+        $doc_revs = clearEmptyKey($doc_revs);
+        $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); 
+
+        if($prettyJsonOutput)
+            $full_doc = indent($full_doc);
+        
+        $doc_revs = toArray($doc_revs);
+
         if($binaryAttachments && !$inlineAttachment && isset($doc_revs["_attachments"]) && $doc_revs["_attachments"]){ 
             foreach($doc_revs["_attachments"] as $key=>$value){
                 $doc_revs["_attachments"][$key]["length"] = strlen($value["data"]);
                 $doc_revs["_attachments"][$key]["stub"] = true;
                 unset($doc_revs["_attachments"][$key]["data"]);
-            } 
+            }  
         }
- 
+      
 
-        $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); 
-        $full_doc = indent($full_doc);
- 		
+
         //IF we want to save each document in separate file
         if($separateFiles){
             
-            if (!file_exists('./' . $database)) 
-                mkdir('./' . $database, 0777, true);
+            $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
+  
+            if (!file_exists('./' . $databaseName)) 
+                mkdir('./' . $databaseName, 0777, true);
 
-            $myfile = fopen("./" . $database . "/" . $doc['id']. ".json", "w");
+            $myfile = fopen("./" . $databaseName . "/" . $doc['id']. ".json", "w");
 
             fwrite($myfile, $full_doc);
             fclose($myfile);
@@ -259,6 +276,8 @@ foreach ($all_docs['rows'] as $doc) {
             }   
         }
    
+
+
         /* 
         *   Binary attachments 
         */
@@ -268,12 +287,22 @@ foreach ($all_docs['rows'] as $doc) {
 
                 $tempUrl = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . "/" . urlencode($attachment_id); 
 
-                //create folder
-                if (!file_exists('./' . $doc['id'])) 
-                    mkdir('./' . $doc['id'], 0777, true);
+                if($separateFiles){ 
+                    
+                    $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
+                    $folder = $databaseName . '/' . $doc['id']; 
+
+                }else{
+                    //create folder
+                    $folder = $doc['id']; 
+                }
+
+                if (!file_exists('./' . $folder)) 
+                    mkdir('./' . $folder, 0777, true);
+
             
                 $ch = getCommonCurl( $tempUrl );
-                $fp = fopen( './' . $doc['id'] . '/' . $attachment_id, 'wb'); //download attachment to current folder
+                $fp = fopen( './' . $folder . '/' . $attachment_id, 'wb'); //download attachment to current folder
                 curl_setopt($ch, CURLOPT_FILE, $fp);
                 curl_setopt($ch, CURLOPT_HEADER, 0);
                 curl_exec($ch);
@@ -434,9 +463,26 @@ function indent(&$json) {
                 $result .= $indentStr;
             }
         }
-
         $prevChar = $char;
     }
 
     return $result;
+}
+
+function clearEmptyKey($input){
+
+    if(!is_array($input))
+        $input = toArray($input); 
+  
+    foreach($input as $key=>$val){
+ 
+        if(is_array($val))
+         $val = clearEmptyKey($val); 
+
+        if($key == "_empty_"){
+            $input[""] = $val;      
+            unset($input[$key]); 
+        }
+    }
+    return $input; 
 }

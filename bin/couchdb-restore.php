@@ -27,7 +27,7 @@ USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test -f dump.json
 HELP;
 
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f'));
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f', 'a', 'D', 'F', 's'));
 error_reporting(!empty($params['e']) ? -1 : 0);
 
 if (isset($params['h'])) {
@@ -42,7 +42,9 @@ $filename = isset($params['f']) ? strval($params['f']) : null;
 $inlineAttachment = isset($params['a']) ? $params['a'] : false; 
 $drop = isset($params['D']) ? strval($params['D']) : false;
 $forceRestore = isset($params['F']) ? $params['F'] : false;
-$separateFiles = isset($params['s']) ? $params['s'] : false;
+$separateFiles = isset($params['s']) ? strval($params['s']) : null;
+
+ 
 
 if ('' === $host || $port < 1 || 65535 < $port) {
     fwrite(STDOUT,  "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
@@ -61,7 +63,7 @@ if (!$separateFiles && (!isset($filename) || !is_file($filename) || !is_readable
 
 if($separateFiles) {
     if(!file_exists("./$separateFiles")){
-        fwrite(STDOUT,  "ERROR: There is no folder named same as database $database" . PHP_EOL);
+        fwrite(STDOUT,  "ERROR: There is no folder named same as database $separateFiles" . PHP_EOL);
         exit(1);
     }
 }
@@ -178,6 +180,8 @@ foreach($decodedContent->docs as $documentTemp){
         unset($documentTemp["unnamed"]);  
     }
  
+    $documentTemp = clearEmptyKey($documentTemp);
+
     $curl = getCommonCurl($url); 
     curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT'); /* or PUT */
     curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($documentTemp));
@@ -290,4 +294,23 @@ function parseParameters(array $params, array $reqs = array(), array $multiple =
         }
     }
     return $result;
+}
+
+
+function clearEmptyKey($input){
+
+    if(!is_array($input))
+        $input = toArray($input); 
+  
+    foreach($input as $key=>$val){
+ 
+        if(is_array($val))
+         $val = clearEmptyKey($val); 
+
+        if($key == "_empty_"){
+            $input[""] = $val;      
+            unset($input[$key]); 
+        }
+    }
+    return $input; 
 }

@@ -28,7 +28,7 @@ USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test > dump.json
 HELP;
 
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y'));
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y', 'a', 'A', 'P', 's', 't'));
 error_reporting(!empty($params['e']) ? -1 : 0);
 defined('JSON_UNESCAPED_SLASHES') || define('JSON_UNESCAPED_SLASHES', '0');
 defined('JSON_UNESCAPED_UNICODE') || define('JSON_UNESCAPED_UNICODE', '0');
@@ -49,6 +49,9 @@ $prettyJsonOutput = (isset($params['P'])) ? $params['P'] : false;
 $separateFiles = (isset($params['s'])) ? $params['s'] : false;
 $timeStamp = (isset($params['t'])) ? $params['t'] : false;
 $callbackFilter = null;
+
+
+$databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
   
   
 if (null !== $callbackFile) {
@@ -190,10 +193,7 @@ foreach ($all_docs['rows'] as $doc) {
     
             //IF we want to save each document in separate file
             if($separateFiles){ 
-
-
-                $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
-                 
+ 
                 if (!file_exists('./' . $databaseName)) 
                     mkdir('./' . $databaseName, 0777, true);
  
@@ -253,8 +253,6 @@ foreach ($all_docs['rows'] as $doc) {
         //IF we want to save each document in separate file
         if($separateFiles){
             
-            $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
-  
             if (!file_exists('./' . $databaseName)) 
                 mkdir('./' . $databaseName, 0777, true);
 
@@ -285,21 +283,11 @@ foreach ($all_docs['rows'] as $doc) {
 
             foreach($doc_revs["_attachments"] as $attachment_id => $content){ 
 
-                $tempUrl = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . "/" . urlencode($attachment_id); 
-
-                if($separateFiles){ 
-                    
-                    $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
-                    $folder = $databaseName . '/' . $doc['id']; 
-
-                }else{
-                    //create folder
-                    $folder = $doc['id']; 
-                }
-
+                $tempUrl = "http://{$host}:{$port}/{$database}/" . urlencode($doc['id']) . "/" . urlencode($attachment_id);  
+                $folder = $databaseName . '/' . $doc['id'];  
+                
                 if (!file_exists('./' . $folder)) 
                     mkdir('./' . $folder, 0777, true);
-
             
                 $ch = getCommonCurl( $tempUrl );
                 $fp = fopen( './' . $folder . '/' . $attachment_id, 'wb'); //download attachment to current folder

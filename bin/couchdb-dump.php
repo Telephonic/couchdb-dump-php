@@ -28,7 +28,7 @@ USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test > dump.json
 HELP;
 
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y', 'a', 'A', 'P', 's', 't'));
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y' ));
 error_reporting(!empty($params['e']) ? -1 : 0);
 defined('JSON_UNESCAPED_SLASHES') || define('JSON_UNESCAPED_SLASHES', '0');
 defined('JSON_UNESCAPED_UNICODE') || define('JSON_UNESCAPED_UNICODE', '0');
@@ -49,6 +49,7 @@ $prettyJsonOutput = (isset($params['P'])) ? $params['P'] : false;
 $separateFiles = (isset($params['s'])) ? $params['s'] : false;
 $timeStamp = (isset($params['t'])) ? $params['t'] : false;
 $callbackFilter = null;
+
 
 
 $databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
@@ -235,8 +236,6 @@ foreach ($all_docs['rows'] as $doc) {
         $doc_revs = clearEmptyKey($doc_revs);
         $full_doc = json_encode($doc_revs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); 
 
-        if($prettyJsonOutput)
-            $full_doc = indent($full_doc);
         
         $doc_revs = toArray($doc_revs);
 
@@ -248,8 +247,10 @@ foreach ($all_docs['rows'] as $doc) {
             }  
         }
       
+        if($prettyJsonOutput)
+            $full_doc = indent($full_doc);
 
-
+ 
         //IF we want to save each document in separate file
         if($separateFiles){
             

@@ -77,7 +77,7 @@ class Dumper{
         $this->separateFiles = $separateFiles;
         $this->callbackFilter = $callbackFilter;
 
-        $this->databaseName = ($timeStamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
+        $this->databaseName = ($timestamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
         $fileName = $this->database . '.json';
 
         if(!$this->separateFiles)
@@ -87,7 +87,7 @@ class Dumper{
     public function download(){
 
         // get all docs IDs
-        $url = "http://{$this->host}:{$this->port}/{$this->database}/_all_docs";
+        $url = "http://{$this->host}:{$this->port}/" .  urlencode($this->database) . "/_all_docs"; 
         fwrite(STDERR, "Fetching all documents info from db '{$this->database}' at {$this->host}:{$this->port} ..." . PHP_EOL);
         $curl = getCommonCurl($url);
         $result = trim(curl_exec($curl));
@@ -416,7 +416,7 @@ if($groupDownload){
                         $binaryAttachments, 
                         $prettyJsonOutput, 
                         $separateFiles, 
-                        $timestamp, 
+                        $timeStamp, 
                         $callbackFilter
                     ); 
                     $dumper->download(); 

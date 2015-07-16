@@ -17,6 +17,7 @@ OPTIONS:
    -p <PORT>          Port of CouchDB server (default: 5984).
    -d <DATABASE>      Database to dump.
    -g                 Download all databases from the server.
+   -z                 Compress output group directory in .tar.gz archive
    -a                 Fetch attachments inline (capture them in base64 encoded format).
    -X                 No revisions history in dump.
    -A                 Fetch attachments binary (Download them to current folder).
@@ -25,7 +26,6 @@ OPTIONS:
    -m                 Allowing multiprocessing (works only on UNIX/LINUX platform)
    -P                 Pretty JSON output
    -y <PHP_FILE>      Include this PHP script that returns callback/function to check if document/revision needs to be dumped.
-
 
 USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test > dump.json
@@ -46,6 +46,7 @@ class Dumper{
     private $separateFiles;
     private $callbackFilter; 
     private $fp;
+    private $backupFolder;
 
     function Dumper( 
         $host, 
@@ -58,7 +59,8 @@ class Dumper{
         $prettyJsonOutput, 
         $separateFiles, 
         $timestamp, 
-        $callbackFilter
+        $callbackFilter,
+        $backupFolder = ""
     ){
         
         if (!isset($database) || '' === $database) {
@@ -68,7 +70,7 @@ class Dumper{
 
         $this->host = $host;
         $this->port = $port;
-        $this->database = $database; 
+        $this->database = urlencode($database); 
         $this->noHistory = $noHistory;
         $this->callbackFile = $callbackFile;
         $this->inlineAttachment = $inlineAttachment;
@@ -76,10 +78,11 @@ class Dumper{
         $this->prettyJsonOutput = $prettyJsonOutput;
         $this->separateFiles = $separateFiles;
         $this->callbackFilter = $callbackFilter;
+        $this->backupFolder = $backupFolder;
 
-        $this->databaseName = ($timestamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database;
-        $fileName = $this->database . '.json';
-
+        $this->databaseName = $backupFolder . "/" . (($timestamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database);
+        $fileName = $backupFolder . "/" . $this->database . '.json';
+ 
         if(!$this->separateFiles)
             $this->fp = fopen($fileName,"w");
     }   
@@ -87,7 +90,7 @@ class Dumper{
     public function download(){
 
         // get all docs IDs
-        $url = "http://{$this->host}:{$this->port}/" .  urlencode($this->database) . "/_all_docs"; 
+        $url = "http://{$this->host}:{$this->port}/" .  $this->database . "/_all_docs"; 
         fwrite(STDERR, "Fetching all documents info from db '{$this->database}' at {$this->host}:{$this->port} ..." . PHP_EOL);
         $curl = getCommonCurl($url);
         $result = trim(curl_exec($curl));
@@ -106,7 +109,7 @@ class Dumper{
             return; //exit(2);
         }
 
-        if(!$this->separate){
+        if(!$this->separateFiles){
             // first part of dump
             if (!$this->noHistory) {
                 fwrite($this->fp, '{"new_edits":false,"docs":[' . PHP_EOL);
@@ -124,7 +127,7 @@ class Dumper{
         foreach ($all_docs['rows'] as $doc) {
             
             // foreach DOC get all revs
-            if (!$noHistory) {
+            if (!$this->noHistory) {
                 $url = "http://{$this->host}:{$this->port}/{$this->database}/" . urlencode($doc['id']) . "?revs=true&revs_info=true" . (($this->inlineAttachment) ? "&attachments=true" : "");
             } else {  
                 $url = "http://{$this->host}:{$this->port}/{$this->database}/" . urlencode($doc['id']) . (($this->inlineAttachment || $this->binaryAttachments) ? "?attachments=true" : "");
@@ -209,7 +212,7 @@ class Dumper{
                     //if we want to save each document in separate file
                     if($this->separateFiles){ 
  
-                        if (!file_exists('./' . $this->databaseName)) 
+                        if (!file_exists('./' .  $this->databaseName)) 
                             mkdir('./' . $this->databaseName, 0777, true);
          
                         $myfile = fopen("./" . $this->databaseName . "/" . $doc['id'] . '_rev' . $rev['rev'] . ".json", "w");
@@ -268,7 +271,7 @@ class Dumper{
                     
                     if (!file_exists('./' . $this->databaseName)) 
                         mkdir('./' . $this->databaseName, 0777, true);
-
+ 
                     $myfile = fopen("./" . $this->databaseName . "/" . $doc['id']. ".json", "w");
 
                     fwrite($myfile, $full_doc);
@@ -314,10 +317,12 @@ class Dumper{
         }
 
         // end of dump
-        if(!$this->separate)
+        if(!$this->separateFiles)
             fwrite($this->fp, PHP_EOL . ']}' . PHP_EOL);
 
+        if($this->fp)
         fclose($this->fp);
+
         return; //exit(0); 
     } 
 }/* END OF CLASS */
@@ -346,6 +351,7 @@ $prettyJsonOutput = (isset($params['P'])) ? $params['P'] : false;
 $separateFiles = (isset($params['s'])) ? $params['s'] : false;
 $timeStamp = (isset($params['t'])) ? $params['t'] : false;
 $multiprocessing  = (isset($params['m'])) ? $params['m'] : false;
+$compressData  = (isset($params['z'])) ? $params['z'] : false;
 $callbackFilter = null;
   
 if (null !== $callbackFile) {
@@ -395,8 +401,8 @@ if($groupDownload){
 
     try{
         $i = 1;
+        $backupFolder = gmdate("l_jS_\of_F_Y_h_i_s_e");
         foreach($all_docs as $db){
-
 
             if(substr($db, 0, 1) != '_'){
 
@@ -417,15 +423,31 @@ if($groupDownload){
                         $prettyJsonOutput, 
                         $separateFiles, 
                         $timeStamp, 
-                        $callbackFilter
+                        $callbackFilter,
+                        $backupFolder
                     ); 
-                    $dumper->download(); 
-                    exit($i++);
+                    
+                    $dumper->download();  
+
+                    if($pid)exit($i);
+                    $i++;
                 }
 
             }
         }
-        
+
+
+        if($compressData){
+          //Compres file
+          $a = new PharData( $backupFolder . '.tar'); 
+          $a->buildFromDirectory(dirname(__FILE__) . '/' . $backupFolder);    
+          file_put_contents( $backupFolder . '.tar.gz' , gzencode(file_get_contents( $backupFolder . '.tar')));
+
+          //remove other files
+          unlink( realpath($backupFolder) );
+          unlink( realpath($backupFolder . '.tar') ); 
+        }    
+
         if($multiprocessing){
             while (pcntl_waitpid(0, $status) != -1) {
                 $status = pcntl_wexitstatus($status);

@@ -403,7 +403,7 @@ if($groupDownload){
 
     try{
         $i = 1;
-        $backupFolder = gmdate("l_jS_\of_F_Y_h_i_s_e");
+        $backupFolder = "backup_" . strtolower(gmdate("l")) . gmdate("_j-m-Y_h_i_s_e");
         foreach($all_docs as $db){
 
             if(substr($db, 0, 1) != '_'){

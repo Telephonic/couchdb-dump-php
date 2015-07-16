@@ -80,7 +80,9 @@ class Dumper{
         $this->callbackFilter = $callbackFilter;
         $this->backupFolder = $backupFolder;
 
-        $this->databaseName = $backupFolder . "/" . (($timestamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database);
+        $this->databaseName = $backupFolder . "/" . urlencode(($timestamp) ? $database . '-' . date('Y-m-d_H-i-s') . '_UTC'  : $database);
+        $this->databaseName = $this->databaseName;
+
         $fileName = $backupFolder . "/" . $this->database . '.json';
  
         if(!$this->separateFiles)
@@ -213,7 +215,7 @@ class Dumper{
                     if($this->separateFiles){ 
  
                         if (!file_exists('./' .  $this->databaseName)) 
-                            mkdir('./' . $this->databaseName, 0777, true);
+                            mkdir('./' . $this->databaseName , 0777, true);
          
                         $myfile = fopen("./" . $this->databaseName . "/" . $doc['id'] . '_rev' . $rev['rev'] . ".json", "w");
                         fwrite($myfile, $full_doc);

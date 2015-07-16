@@ -413,11 +413,15 @@ if($groupDownload){
             if(substr($db, 0, 1) != '_'){
 
                 if($multiprocessing || $i < $multiprocessing){
-                    
-                    $allowMultiprocessing = true; 
-                    $i++;
-
+                     
                     $pid = pcntl_fork(); 
+                    
+                    if(!$pid){
+                        $allowMultiprocessing = true; 
+                        $i++;
+                    }else 
+                        $pid = 0;
+
                 }else 
                     $pid = 0;
 

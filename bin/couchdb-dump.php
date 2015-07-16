@@ -274,10 +274,12 @@ class Dumper{
                     if (!file_exists('./' . $this->databaseName)) 
                         mkdir('./' . $this->databaseName, 0777, true);
  
-                    $myfile = fopen("./" . $this->databaseName . "/" . $doc['id']. ".json", "w");
+                    $myfile = fopen("./" . $this->databaseName . "/" . $doc['id']. ".json", "wb");
 
-                    fwrite($myfile, $full_doc);
-                    fclose($myfile);
+                    if($myfile != false){
+                        fwrite($myfile, $full_doc);
+                        fclose($myfile);
+                    }
 
                 //Or if we want to join them together..
                 }else{
@@ -331,7 +333,7 @@ class Dumper{
 
 
 
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y' ));
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'y','m' ));
 error_reporting(!empty($params['e']) ? -1 : 0);
 defined('JSON_UNESCAPED_SLASHES') || define('JSON_UNESCAPED_SLASHES', '0');
 defined('JSON_UNESCAPED_UNICODE') || define('JSON_UNESCAPED_UNICODE', '0');
@@ -352,7 +354,7 @@ $binaryAttachments = (isset($params['A']) && $noHistory) ? $params['A'] : false;
 $prettyJsonOutput = (isset($params['P'])) ? $params['P'] : false;
 $separateFiles = (isset($params['s'])) ? $params['s'] : false;
 $timeStamp = (isset($params['t'])) ? $params['t'] : false;
-$multiprocessing  = (isset($params['m'])) ? $params['m'] : false;
+$multiprocessing  = (isset($params['m'])) ? intval($params['m']) : 0;
 $compressData  = (isset($params['z'])) ? $params['z'] : false;
 $callbackFilter = null;
   
@@ -402,18 +404,25 @@ if($groupDownload){
     }
 
     try{
+  
         $i = 1;
         $backupFolder = "backup_" . strtolower(gmdate("l")) . gmdate("_j-m-Y_h_i_s_e");
-        foreach($all_docs as $db){
+        foreach($all_docs as $db){ 
+            $allowMultiprocessing = false;
 
             if(substr($db, 0, 1) != '_'){
 
-                if($multiprocessing)
+                if($multiprocessing || $i < $multiprocessing){
+                    
+                    $allowMultiprocessing = true; 
+                    $i++;
+
                     $pid = pcntl_fork(); 
-                else 
+                }else 
                     $pid = 0;
 
                 if (!$pid) {
+
                     $dumper = new Dumper( 
                         $host, 
                         $port, 
@@ -427,17 +436,28 @@ if($groupDownload){
                         $timeStamp, 
                         $callbackFilter,
                         $backupFolder
-                    ); 
-                    
-                    $dumper->download();  
+                    );  
+                    $dumper->download();   
 
-                    if($pid)exit($i);
-                    $i++;
-                }
-
+                    if($allowMultiprocessing)
+                        exit;   
+                } 
             }
         }
+ 
+        if($multiprocessing){
+            
+            foreach($all_docs as $db){
+                 pcntl_wait($status);
+            }
 
+            /*
+            while (pcntl_waitpid(0, $status) != -1) {
+                $status = pcntl_wexitstatus($status);
+                echo "Child $status completed\n";
+            }
+            */
+        }
 
         if($compressData){
           //Compres file
@@ -446,16 +466,9 @@ if($groupDownload){
           file_put_contents( $backupFolder . '.tar.gz' , gzencode(file_get_contents( $backupFolder . '.tar')));
 
           //remove other files
-          unlink( realpath($backupFolder) );
+          deleteDir( realpath($backupFolder) );
           unlink( realpath($backupFolder . '.tar') ); 
         }    
-
-        if($multiprocessing){
-            while (pcntl_waitpid(0, $status) != -1) {
-                $status = pcntl_wexitstatus($status);
-                echo "Child $status completed\n";
-            }
-        }
 
     }catch(Exception $e){
         fwrite(STDERR, "$e" . PHP_EOL);
@@ -476,7 +489,7 @@ if($groupDownload){
         $binaryAttachments, 
         $prettyJsonOutput, 
         $separateFiles, 
-        $timestamp, 
+        $timeStamp, 
         $callbackFilter
     ); 
     $dumper->download();
@@ -485,7 +498,23 @@ if($groupDownload){
 
 
 
-
+function deleteDir($dirPath) {
+    if (! is_dir($dirPath)) {
+        throw new InvalidArgumentException("$dirPath must be a directory");
+    }
+    if (substr($dirPath, strlen($dirPath) - 1, 1) != '/') {
+        $dirPath .= '/';
+    }
+    $files = glob($dirPath . '*', GLOB_MARK);
+    foreach ($files as $file) {
+        if (is_dir($file)) {
+            deleteDir($file);
+        } else {
+            unlink($file);
+        }
+    }
+    rmdir($dirPath);
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////

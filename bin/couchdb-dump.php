@@ -415,7 +415,7 @@ if($groupDownload){
                 if($multiprocessing || $i < $multiprocessing){
                      
                     $pid = pcntl_fork(); 
-                    
+
                     if(!$pid){
                         $allowMultiprocessing = true; 
                         $i++;
@@ -443,8 +443,10 @@ if($groupDownload){
                     );  
                     $dumper->download();   
 
-                    if($allowMultiprocessing)
+                    if($allowMultiprocessing){
+                        $i--;
                         exit;   
+                    }                        
                 } 
             }
         }

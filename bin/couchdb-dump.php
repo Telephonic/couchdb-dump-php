@@ -137,7 +137,7 @@ class Dumper{
 
             //fwrite(STDERR, "[{$doc['id']}]");
             $percentage =  round(  ($i++/sizeof($all_docs['rows']))*100   , 2) ; 
-            fwrite(STDERR, "Processing database \"$this->database\": $percentage%");
+            fwrite(STDERR, "Processing database \"$this->database\": $percentage%\n");
          
             $curl = getCommonCurl($url);
              
@@ -406,15 +406,17 @@ if($groupDownload){
     try{
   
         $i = 1;
+        $processes = array();
         $backupFolder = "backup_" . strtolower(gmdate("l")) . gmdate("_j-m-Y_h_i_s_e");
         foreach($all_docs as $db){ 
-            $allowMultiprocessing = false;
 
             if(substr($db, 0, 1) != '_'){
 
+                $allowMultiprocessing = false;
+
                 if($multiprocessing || $i < $multiprocessing){
                      
-                    $pid = pcntl_fork(); 
+                   $processes[] =  $pid = pcntl_fork(); 
 
                     if(!$pid){
                         $allowMultiprocessing = true; 
@@ -452,10 +454,10 @@ if($groupDownload){
         }
  
         if($multiprocessing){
-            
-            foreach($all_docs as $db){
-                 pcntl_wait($status);
-            }
+
+            foreach($processes as $temp){
+                pcntl_wait($temp, $status, WUNTRACED);
+            }  
 
             /*
             while (pcntl_waitpid(0, $status) != -1) {
@@ -472,8 +474,8 @@ if($groupDownload){
           file_put_contents( $backupFolder . '.tar.gz' , gzencode(file_get_contents( $backupFolder . '.tar')));
 
           //remove other files
-          deleteDir( realpath($backupFolder) );
           unlink( realpath($backupFolder . '.tar') ); 
+          deleteDir( realpath($backupFolder) );
         }    
 
     }catch(Exception $e){
@@ -483,7 +485,6 @@ if($groupDownload){
     return; //exit(1);
 
 }else{
- 
 
     $dumper = new Dumper( 
         $host, 
@@ -499,8 +500,13 @@ if($groupDownload){
         $callbackFilter
     ); 
     $dumper->download();
- 
 }
+
+
+
+
+
+
 
 
 

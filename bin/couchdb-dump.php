@@ -105,11 +105,24 @@ class Dumper{
             fwrite(STDERR, "ERROR: Unsupported response when fetching all documents info from db '{$this->database}' (http status code = {$this->statusCode}) " . PHP_EOL);
             return; //exit(2);
         }
+        
 
         if (!isset($all_docs['rows']) || !count($all_docs['rows']) || !is_array($all_docs['rows'])) {
-            fwrite(STDERR, "ERROR: No documents found in db '{$this->database}'." . PHP_EOL);
-            return; //exit(2);
+
+            //if we want to save each document in separate file
+            if($this->separateFiles){  
+                if (!file_exists('./' .  $this->databaseName)) 
+                    mkdir('./' . $this->databaseName , 0777, true); 
+
+               if(!count($all_docs['rows'])) {
+                    $dummy = fopen( './' . $this->databaseName . '/' . 'dummy', "a+");
+                    fwrite($dummy, "1", 1); 
+                    fclose($dummy);
+               }
+            } 
+            fwrite(STDERR, "ERROR: No documents found in db '{$this->database}'." . PHP_EOL);  
         }
+        
 
         if(!$this->separateFiles){
             // first part of dump
@@ -455,9 +468,13 @@ if($groupDownload){
  
         if($multiprocessing){
 
+            fwrite(STDERR, "Removing daemon processes!" . PHP_EOL);
+
             foreach($processes as $temp){
                 pcntl_wait($temp, $status, WUNTRACED);
-            }  
+            } 
+
+            fwrite(STDERR, "Daemon processes removed!" . PHP_EOL); 
 
             /*
             while (pcntl_waitpid(0, $status) != -1) {
@@ -467,15 +484,24 @@ if($groupDownload){
             */
         }
 
-        if($compressData){
-          //Compres file
-          $a = new PharData( $backupFolder . '.tar'); 
-          $a->buildFromDirectory(dirname(__FILE__) . '/' . $backupFolder);    
-          file_put_contents( $backupFolder . '.tar.gz' , gzencode(file_get_contents( $backupFolder . '.tar')));
+        if($compressData){ 
+            fwrite(STDERR, "Compresing files and files.." . PHP_EOL);
+             
+            //Compres file
+            $a = new PharData( $backupFolder . '.tar'); 
+            $a->buildFromDirectory(dirname(__FILE__) . '/' . $backupFolder);   
 
-          //remove other files
-          unlink( realpath($backupFolder . '.tar') ); 
-          deleteDir( realpath($backupFolder) );
+            file_put_contents( $backupFolder . '.tar.gz' , gzencode(file_get_contents( $backupFolder . '.tar'), 9));
+
+            fwrite(STDERR, "Compresion complete!" . PHP_EOL);
+            fwrite(STDERR, "Removing temp folders and files.." . PHP_EOL);
+
+
+            //remove other files
+            unlink( realpath($backupFolder . '.tar') ); 
+            deleteDir( realpath($backupFolder) );
+
+            fwrite(STDERR, "Temp folders and files removed!" . PHP_EOL);
         }    
 
     }catch(Exception $e){

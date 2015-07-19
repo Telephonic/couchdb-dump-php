@@ -22,6 +22,8 @@ OPTIONS:
    -g                 Group upload of all databases to the server.
    -z                 Decompress input group directory from .tar.gz archive
    -r                 Delete folder after group upload
+   -au                Admin Username                  
+   -ap                Admin Password
 
 WARNING:
    Please note, that it is not a good idea to restore dump on existing database with documents.
@@ -29,10 +31,7 @@ WARNING:
 USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test -f dump.json
 HELP;
-
-
-
-
+ 
 
 class Restorer{
 
@@ -44,6 +43,9 @@ class Restorer{
     private $drop;
     private $forceRestore;
     private $separateFiles;
+    private $adminUsername;
+    private $adminPassword; 
+    private $adminUrl;
 
     function Restorer( 
         $host,
@@ -53,7 +55,9 @@ class Restorer{
         $inlineAttachment,
         $drop,
         $forceRestore,
-        $separateFiles
+        $separateFiles, 
+        $adminUsername,
+        $adminPassword
     )
     {
         $this->host = $host;
@@ -64,6 +68,14 @@ class Restorer{
         $this->drop = $drop;
         $this->forceRestore = $forceRestore;
         $this->separateFiles = $separateFiles;
+        $this->adminUsername = $adminUsername;
+        $this->adminPassword = $adminPassword;
+
+        if(!empty($adminUsername) && !empty($adminPassword)){
+            $this->adminUrl = $adminUsername . ':' . $adminPassword . '@';
+        }else{
+            $this->adminUrl = '';
+        }
  
         if ('' === $this->host || $this->port < 1 || 65535 < $this->port) {
             fwrite(STDOUT,  "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
@@ -96,7 +108,7 @@ class Restorer{
     public function restore(){
 
         // check db
-        $url = "http://{$this->host}:{$this->port}/". urlencode($this->database) . "/";
+        $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/". urlencode($this->database) . "/";
         fwrite(STDOUT,  "Checking db '{$this->database}' at {$this->host}:{$this->port} ..." . PHP_EOL);
         $curl = getCommonCurl($url);
         $result = trim(curl_exec($curl));
@@ -115,7 +127,7 @@ class Restorer{
         } else {
             // unknown status
             fwrite(STDOUT,  "ERROR: Unsupported response when checking db '{$this->database}' status (http status code = {$statusCode}) " . $result . PHP_EOL);
-            exit(2);
+            return;
         }
         if ($this->drop && $exists) {
             // drop $this->database
@@ -127,7 +139,7 @@ class Restorer{
             curl_close($curl);
             if (200 != $statusCode) {
                 fwrite(STDOUT,  "ERROR: Unsupported response when deleting db '{$this->database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
-                exit(2);
+                return;
             }
             $exists = false;
             $docCount = 0;
@@ -135,8 +147,9 @@ class Restorer{
         if ($docCount && !$this->forceRestore) {
             // has documents, but no force
             fwrite(STDOUT,  "ERROR: $this->database '{$this->database}' has {$docCount} documents. Refusing to restore without -F force flag." . PHP_EOL);
-            exit(2);
+            return;
         }
+
         if (!$exists) {
             // create db
             fwrite(STDOUT,  "Creating $this->database '{$this->database}'..." . PHP_EOL);
@@ -147,7 +160,7 @@ class Restorer{
             curl_close($curl);
             if (201 != $statusCode) {
                 fwrite(STDOUT,  "ERROR: Unsupported response when creating db '{$this->database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
-                exit(2);
+                return;
             }
         }
 
@@ -155,7 +168,7 @@ class Restorer{
 
             $files = array();
             foreach(glob("$this->separateFiles/*") as $file) {
-                if($file != '.' && $file != '..'){ 
+                if($file != '.' && $file != '..' && $file != 'dummy'){ 
                     $files[] = json_decode(file_get_contents($file), true);        
                 }
             }
@@ -179,7 +192,7 @@ class Restorer{
             $documentTemp = (array)$documentTemp; 
          
             //we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
-            $url = "http://{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]); 
+            $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]); 
             $curl = getCommonCurl($url);
             $result = trim(curl_exec($curl));
             $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -194,7 +207,7 @@ class Restorer{
             if(isset($documentTemp["_revisions"]))
                 unset($documentTemp["_revisions"]);
 
-            $url = "http://{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]);
+            $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]);
 
             fwrite(STDOUT,  "Restoring '{$documentTemp['_id']}|rev:{$documentTemp['_rev']}' into db '{$this->database}' at {$this->host}:{$this->port}.." . PHP_EOL);
 
@@ -247,14 +260,12 @@ class Restorer{
     }
 }
 
+ 
 
 
 
 
-
-
-
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f', 'a', 'D', 's' ));
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f', 'a', 'D', 's' , 'au', 'ap'));
 error_reporting(!empty($params['e']) ? -1 : 0);
 
 if (isset($params['h'])) {
@@ -275,6 +286,9 @@ $decompressData  = (isset($params['z'])) ? $params['z'] : false;
 $deleteAfterGroupUpload  = (isset($params['r'])) ? $params['r'] : false;
 $multiprocessing  = (isset($params['m'])) ? intval($params['m']) : 0;
 
+$adminUsername = isset($params['au']) ? trim($params['au']) : ''; 
+$adminPassword = isset($params['ap']) ? trim($params['ap']) : '';
+
 if ('' === $host || $port < 1 || 65535 < $port) {
     fwrite(STDERR, "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
     exit(1);
@@ -285,72 +299,34 @@ if($groupDownload){
  
     if($decompressData){
 
+        fwrite(STDERR, "Decompresing files." . PHP_EOL);
+
         $clearFolderName = pathinfo($filename, PATHINFO_FILENAME);
         $clearFolderName = pathinfo($clearFolderName, PATHINFO_FILENAME); 
 
         if(!file_exists($clearFolderName . '.tar')){
+
+            fwrite(STDERR, "Extracting to $clearFolderName.tar" . PHP_EOL);
             // decompress from gz
             $p = new PharData($clearFolderName . '.tar.gz');
             $p->decompress(); // creates files.tar
         }
 
         if(!file_exists($clearFolderName)){
+
+            fwrite(STDERR, "Extracting to $clearFolderName" . PHP_EOL); 
             // unarchive from the tar
             $phar = new PharData($clearFolderName . '.tar');
             $phar->extractTo( $clearFolderName );   
         }
 
         $filename = $clearFolderName;
+
+        fwrite(STDERR, "Decompresing complete!" . PHP_EOL);
     }
 
     try{
-  
-        $i = 1;
-        $backupFolder = "backup_" . strtolower(gmdate("l")) . gmdate("_j-m-Y_h_i_s_e");
-        foreach($all_docs as $db){ 
-            $allowMultiprocessing = false;
-
-            if(substr($db, 0, 1) != '_'){
-
-                if($multiprocessing || $i < $multiprocessing){
-                     
-                    $pid = pcntl_fork(); 
-
-                    if(!$pid){
-                        $allowMultiprocessing = true; 
-                        $i++;
-                    }else 
-                        $pid = 0;
-
-                }else 
-                    $pid = 0;
-
-                if (!$pid) {
-
-                    $dumper = new Dumper( 
-                        $host, 
-                        $port, 
-                        $db,  
-                        $noHistory, 
-                        $callbackFile, 
-                        $inlineAttachment, 
-                        $binaryAttachments, 
-                        $prettyJsonOutput, 
-                        $separateFiles, 
-                        $timeStamp, 
-                        $callbackFilter,
-                        $backupFolder
-                    );  
-                    $dumper->download();   
-
-                    if($allowMultiprocessing){
-                        $i--;
-                        exit;   
-                    }                        
-                } 
-            }
-        }
-  
+   
         $files = scandir($filename, 1);
         $i = 1;
         $processes = array();
@@ -383,7 +359,9 @@ if($groupDownload){
                         $inlineAttachment,
                         $drop,
                         $forceRestore,
-                        $filename . '/' . $file
+                        $filename . '/' . $file,
+                        $adminUsername,
+                        $adminPassword
                     );
                     $tempRestorer->restore();
 
@@ -397,17 +375,21 @@ if($groupDownload){
         } 
 
         if($multiprocessing){
+
+            fwrite(STDERR, "Removing daemon processes!" . PHP_EOL);
             foreach($processes as $temp){
                 pcntl_wait($temp, $status, WUNTRACED);
             } 
+            fwrite(STDERR, "Daemon processes removed!" . PHP_EOL);
         } 
 
         if($deleteAfterGroupUpload){
-
+            fwrite(STDERR, "Removing temp folders and files.." . PHP_EOL);
             if(file_exists(realpath($filename . '.tar'))){ 
                 unlink( realpath($filename . '.tar') ); 
             } 
             deleteDir( realpath($filename) ); 
+            fwrite(STDERR, "Temp folders and files removed!" . PHP_EOL);
         }
 
     }catch(Exception $e){
@@ -424,7 +406,9 @@ if($groupDownload){
         $inlineAttachment,
         $drop,
         $forceRestore,
-        $separateFiles
+        $separateFiles, 
+        $adminUsername,
+        $adminPassword
     );
     $tempRestorer->restore(); 
 

@@ -18,6 +18,12 @@ OPTIONS:
    -D                 Drop and create database, if needed (default: create db, only if it does not exist).
    -F                 Force restore on existing db with documents.
    -a                 Restore inline attachments (from base64 encoded format).
+   -s                 Specify directory from which documnest should be restored
+   -g                 Group upload of all databases to the server.
+   -z                 Decompress input group directory from .tar.gz archive
+   -r                 Delete folder after group upload
+   -au                Admin Username                  
+   -ap                Admin Password
 
 WARNING:
    Please note, that it is not a good idea to restore dump on existing database with documents.
@@ -25,8 +31,241 @@ WARNING:
 USAGE:
    {$_SERVER['argv'][0]} -H localhost -p 5984 -d test -f dump.json
 HELP;
+ 
 
-$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f'));
+class Restorer{
+
+    private $host;
+    private $port;
+    private $database;
+    private $filename;
+    private $inlineAttachment;
+    private $drop;
+    private $forceRestore;
+    private $separateFiles;
+    private $adminUsername;
+    private $adminPassword; 
+    private $adminUrl;
+
+    function Restorer( 
+        $host,
+        $port,
+        $database,
+        $filename,
+        $inlineAttachment,
+        $drop,
+        $forceRestore,
+        $separateFiles, 
+        $adminUsername,
+        $adminPassword
+    )
+    {
+        $this->host = $host;
+        $this->port = $port;
+        $this->database = $database;
+        $this->filename = $filename;
+        $this->inlineAttachment = $inlineAttachment;
+        $this->drop = $drop;
+        $this->forceRestore = $forceRestore;
+        $this->separateFiles = $separateFiles;
+        $this->adminUsername = $adminUsername;
+        $this->adminPassword = $adminPassword;
+
+        if(!empty($adminUsername) && !empty($adminPassword)){
+            $this->adminUrl = $adminUsername . ':' . $adminPassword . '@';
+        }else{
+            $this->adminUrl = '';
+        }
+ 
+        if ('' === $this->host || $this->port < 1 || 65535 < $this->port) {
+            fwrite(STDOUT,  "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
+            exit(1);
+        }
+
+        if (!isset($this->database) || '' === $this->database) {
+            fwrite(STDOUT,  "ERROR: Please specify database name (-d <DATABASE>)." . PHP_EOL);
+            exit(1);
+        }
+
+        if (!$this->separateFiles && (!isset($this->filename) || !is_file($this->filename) || !is_readable($this->filename))) {
+            fwrite(STDOUT,  "ERROR: Please specify JSON file to restore (-f <FILENAME>)." . PHP_EOL);
+            exit(1);
+        }
+
+        if($this->separateFiles) {
+            if(!file_exists("./$this->separateFiles")){
+                fwrite(STDOUT,  "ERROR: There is no folder named same as database $this->separateFiles" . PHP_EOL);
+                exit(1);
+            }
+        }
+
+
+
+
+    }
+
+
+    public function restore(){
+
+        // check db
+        $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/". urlencode($this->database) . "/";
+        fwrite(STDOUT,  "Checking db '{$this->database}' at {$this->host}:{$this->port} ..." . PHP_EOL);
+        $curl = getCommonCurl($url);
+        $result = trim(curl_exec($curl));
+        $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        curl_close($curl);
+        if (200 == $statusCode) {
+            // $this->database exists
+            $exists = true;
+            $db_info = json_decode($result, true);
+            $docCount = (isset($db_info['doc_count']) ? $db_info['doc_count'] : 0);
+            fwrite(STDOUT,  "$this->database '{$this->database}' has {$docCount} documents." . PHP_EOL);
+        } elseif (404 == $statusCode) {
+            // $this->database not found
+            $exists = false;
+            $docCount = 0;
+        } else {
+            // unknown status
+            fwrite(STDOUT,  "ERROR: Unsupported response when checking db '{$this->database}' status (http status code = {$statusCode}) " . $result . PHP_EOL);
+            return;
+        }
+        if ($this->drop && $exists) {
+            // drop $this->database
+            fwrite(STDOUT,  "Deleting $this->database '{$this->database}'..." . PHP_EOL);
+            $curl = getCommonCurl($url);
+            curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'DELETE');
+            $result = trim(curl_exec($curl));
+            $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            curl_close($curl);
+            if (200 != $statusCode) {
+                fwrite(STDOUT,  "ERROR: Unsupported response when deleting db '{$this->database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
+                return;
+            }
+            $exists = false;
+            $docCount = 0;
+        }
+        if ($docCount && !$this->forceRestore) {
+            // has documents, but no force
+            fwrite(STDOUT,  "ERROR: $this->database '{$this->database}' has {$docCount} documents. Refusing to restore without -F force flag." . PHP_EOL);
+            return;
+        }
+
+        if (!$exists) {
+            // create db
+            fwrite(STDOUT,  "Creating $this->database '{$this->database}'..." . PHP_EOL);
+            $curl = getCommonCurl($url);
+            curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT');
+            $result = trim(curl_exec($curl));
+            $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            curl_close($curl);
+            if (201 != $statusCode) {
+                fwrite(STDOUT,  "ERROR: Unsupported response when creating db '{$this->database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
+                return;
+            }
+        }
+
+        if($this->separateFiles){
+
+            $files = array();
+            foreach(glob("$this->separateFiles/*") as $file) {
+                if($file != '.' && $file != '..' && $file != 'dummy'){ 
+                    $files[] = json_decode(file_get_contents($file), true);        
+                }
+            }
+
+            $decodedContent = new stdClass();
+            $decodedContent->new_edits = false;
+            $decodedContent->docs = $files; 
+
+
+        } else {
+            // post dump
+            $fileContent = file_get_contents($filename);
+            $decodedContent = json_decode($fileContent);
+        }
+         
+        fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING STARTED <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL); 
+           
+        foreach($decodedContent->docs as $documentTemp){ 
+         
+            if(!is_array($documentTemp))
+            $documentTemp = (array)$documentTemp; 
+         
+            //we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
+            $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]); 
+            $curl = getCommonCurl($url);
+            $result = trim(curl_exec($curl));
+            $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
+
+            if($statusCode == 200){
+                $result = json_decode($result,true); 
+                if(isset($result["_rev"]) && $result["_rev"])
+                    $documentTemp["_rev"] = $result["_rev"];
+            }
+
+            if(isset($documentTemp["_revisions"]))
+                unset($documentTemp["_revisions"]);
+
+            $url = "http://{$this->adminUrl}{$this->host}:{$this->port}/" . urlencode($this->database) . "/" . urlencode($documentTemp["_id"]);
+
+            fwrite(STDOUT,  "Restoring '{$documentTemp['_id']}|rev:{$documentTemp['_rev']}' into db '{$this->database}' at {$this->host}:{$this->port}.." . PHP_EOL);
+
+            //If we don't wont to upload attachments then we need to remove content from the file used for upload
+            if(!$this->inlineAttachment && isset($documentTemp["_attachments"]) && $documentTemp["_attachments"]){
+                unset($documentTemp["_attachments"]); 
+                unset($documentTemp["unnamed"]);  
+            }
+         
+            $documentTemp = clearEmptyKey($documentTemp);
+
+            $curl = getCommonCurl($url); 
+            curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT'); /* or PUT */
+            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($documentTemp));
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+                'Content-type: application/json',
+                'Accept: */*'
+            ));
+
+            // TODO: use next string when get ideas why it is not working and how to fix it.
+            //curl_setopt($curl, CURLOPT_INFILE, $filehandle); // strange, but this does not work
+            $result = trim(curl_exec($curl));
+
+            //fclose($filehandle);
+            $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            curl_close($curl);
+            /*
+            if ($statusCode < 200 || 299 < $statusCode) {
+                fwrite(STDOUT,  "ERROR: Unable to post data to \"{$url}\" (http status code = {$statusCode}) " . $result . PHP_EOL); 
+            }
+            */
+         
+            $messages = json_decode($result, true); 
+
+            $errors = 0;
+            if (is_array($messages)) { 
+                if (isset($messages['error'])) {
+                    $doc_id = isset($messages['id']) ? $messages['id'] : $documentTemp["_id"];
+                    $reason = isset($messages['reason']) ? $messages['reason'] : $messages['error'];
+                    fwrite(STDOUT,  "ERROR: [{$doc_id}] = {$reason}" . PHP_EOL);
+                    $errors++;
+                } else if (isset($messages['ok'])) { 
+                    $doc_id = isset($messages['id']) ? $messages['id'] : '?';
+                    fwrite(STDOUT,  "SUCCESS: [{$doc_id}] restored!" . PHP_EOL);
+                }
+            } 
+        } 
+        fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING FINISHED! <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL);  
+    }
+}
+
+ 
+
+
+
+
+$params = parseParameters($_SERVER['argv'], array('H', 'p', 'd', 'f', 'a', 'D', 's' , 'au', 'ap'));
 error_reporting(!empty($params['e']) ? -1 : 0);
 
 if (isset($params['h'])) {
@@ -34,6 +273,7 @@ if (isset($params['h'])) {
     exit(1);
 }
  
+$groupDownload = isset($params['g']) ? strval($params['g']) : false;
 $host = isset($params['H']) ? trim($params['H']) : 'localhost';
 $port = isset($params['p']) ? intval($params['p']) : 5984;
 $database = isset($params['d']) ? strval($params['d']) : null;
@@ -41,158 +281,177 @@ $filename = isset($params['f']) ? strval($params['f']) : null;
 $inlineAttachment = isset($params['a']) ? $params['a'] : false; 
 $drop = isset($params['D']) ? strval($params['D']) : false;
 $forceRestore = isset($params['F']) ? $params['F'] : false;
+$separateFiles = isset($params['s']) ? strval($params['s']) : null;
+$decompressData  = (isset($params['z'])) ? $params['z'] : false;
+$deleteAfterGroupUpload  = (isset($params['r'])) ? $params['r'] : false;
+$multiprocessing  = (isset($params['m'])) ? intval($params['m']) : 0;
+
+$adminUsername = isset($params['au']) ? trim($params['au']) : ''; 
+$adminPassword = isset($params['ap']) ? trim($params['ap']) : '';
 
 if ('' === $host || $port < 1 || 65535 < $port) {
-    fwrite(STDOUT,  "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
+    fwrite(STDERR, "ERROR: Please specify valid hostname and port (-H <HOSTNAME> and -p <PORT>)." . PHP_EOL);
     exit(1);
 }
 
-if (!isset($database) || '' === $database) {
-    fwrite(STDOUT,  "ERROR: Please specify database name (-d <DATABASE>)." . PHP_EOL);
-    exit(1);
-}
 
-if (!isset($filename) || !is_file($filename) || !is_readable($filename)) {
-    fwrite(STDOUT,  "ERROR: Please specify JSON file to restore (-f <FILENAME>)." . PHP_EOL);
-    exit(1);
-}
-//$filehandle = fopen($filename, 'rb');
-//if (!$filehandle) {
-//    fwrite(STDOUT,  "ERROR: Unable to open '{$filename}'." . PHP_EOL);
-//    exit(2);
-//}
-
-// check db
-$url = "http://{$host}:{$port}/{$database}/";
-fwrite(STDOUT,  "Checking db '{$database}' at {$host}:{$port} ..." . PHP_EOL);
-$curl = getCommonCurl($url);
-$result = trim(curl_exec($curl));
-$statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-curl_close($curl);
-if (200 == $statusCode) {
-    // database exists
-    $exists = true;
-    $db_info = json_decode($result, true);
-    $docCount = (isset($db_info['doc_count']) ? $db_info['doc_count'] : 0);
-    fwrite(STDOUT,  "Database '{$database}' has {$docCount} documents." . PHP_EOL);
-} elseif (404 == $statusCode) {
-    // database not found
-    $exists = false;
-    $docCount = 0;
-} else {
-    // unknown status
-    fwrite(STDOUT,  "ERROR: Unsupported response when checking db '{$database}' status (http status code = {$statusCode}) " . $result . PHP_EOL);
-    exit(2);
-}
-if ($drop && $exists) {
-    // drop database
-    fwrite(STDOUT,  "Deleting database '{$database}'..." . PHP_EOL);
-    $curl = getCommonCurl($url);
-    curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'DELETE');
-    $result = trim(curl_exec($curl));
-    $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-    curl_close($curl);
-    if (200 != $statusCode) {
-        fwrite(STDOUT,  "ERROR: Unsupported response when deleting db '{$database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
-        exit(2);
-    }
-    $exists = false;
-    $docCount = 0;
-}
-if ($docCount && !$forceRestore) {
-    // has documents, but no force
-    fwrite(STDOUT,  "ERROR: Database '{$database}' has {$docCount} documents. Refusing to restore without -F force flag." . PHP_EOL);
-    exit(2);
-}
-if (!$exists) {
-    // create db
-    fwrite(STDOUT,  "Creating database '{$database}'..." . PHP_EOL);
-    $curl = getCommonCurl($url);
-    curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT');
-    $result = trim(curl_exec($curl));
-    $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-    curl_close($curl);
-    if (201 != $statusCode) {
-        fwrite(STDOUT,  "ERROR: Unsupported response when creating db '{$database}' (http status code = {$statusCode}) " . $result . PHP_EOL);
-        exit(2);
-    }
-}
-
-// post dump
-$fileContent = file_get_contents($filename);
-$decodedContent = json_decode($fileContent);
+if($groupDownload){
  
-fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING STARTED <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL); 
-foreach($decodedContent->docs as $documentTemp){ 
+    if($decompressData){
 
-    $documentTemp = (array)$documentTemp;  
+        fwrite(STDERR, "Decompresing files." . PHP_EOL);
 
-    //so we need to fetch the latest revision of the document, because in order to upload a new version of document we MUST know latest rev ID
-    $url = "http://{$host}:{$port}/{$database}/" . $documentTemp["_id"]; 
-    $curl = getCommonCurl($url);
-    $result = trim(curl_exec($curl));
-    $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $clearFolderName = pathinfo($filename, PATHINFO_FILENAME);
+        $clearFolderName = pathinfo($clearFolderName, PATHINFO_FILENAME); 
 
-    if($statusCode == 200){
-        $result = json_decode($result,true); 
-        if(isset($result["_rev"]) && $result["_rev"])
-            $documentTemp["_rev"] = $result["_rev"];
-    }
+        if(!file_exists($clearFolderName . '.tar')){
 
-    if(isset($documentTemp["_revisions"]))
-        unset($documentTemp["_revisions"]);
-    
-    $url = "http://{$host}:{$port}/{$database}/" . $documentTemp["_id"];
-
-    fwrite(STDOUT,  "Restoring '{$documentTemp['_id']}|rev:{$documentTemp['_rev']}' into db '{$database}' at {$host}:{$port}.." . PHP_EOL);
-
-    //If we don't wont to upload attachments then we need to remove content from the file used for upload
-    if(!$inlineAttachment && isset($documentTemp["_attachments"]) && $documentTemp["_attachments"]){
-        unset($documentTemp["_attachments"]); 
-        unset($documentTemp["unnamed"]);  
-    }
- 
-    $curl = getCommonCurl($url); 
-    curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'PUT'); /* or PUT */
-    curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($documentTemp));
-    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($curl, CURLOPT_HTTPHEADER, array(
-        'Content-type: application/json',
-        'Accept: */*'
-    ));
-
-    // TODO: use next string when get ideas why it is not working and how to fix it.
-    //curl_setopt($curl, CURLOPT_INFILE, $filehandle); // strange, but this does not work
-    $result = trim(curl_exec($curl));
- 
-    //fclose($filehandle);
-    $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-    curl_close($curl);
-    /*
-    if ($statusCode < 200 || 299 < $statusCode) {
-        fwrite(STDOUT,  "ERROR: Unable to post data to \"{$url}\" (http status code = {$statusCode}) " . $result . PHP_EOL); 
-    }
-    */
- 
-    $messages = json_decode($result, true); 
-
-    $errors = 0;
-    if (is_array($messages)) { 
-        if (isset($messages['error'])) {
-            $doc_id = isset($messages['id']) ? $messages['id'] : $documentTemp["_id"];
-            $reason = isset($messages['reason']) ? $messages['reason'] : $messages['error'];
-            fwrite(STDOUT,  "ERROR: [{$doc_id}] = {$reason}" . PHP_EOL);
-            $errors++;
-        } else if (isset($messages['ok'])) { 
-            $doc_id = isset($messages['id']) ? $messages['id'] : '?';
-            fwrite(STDOUT,  "SUCCESS: [{$doc_id}] restored!" . PHP_EOL);
+            fwrite(STDERR, "Extracting to $clearFolderName.tar" . PHP_EOL);
+            // decompress from gz
+            $p = new PharData($clearFolderName . '.tar.gz');
+            $p->decompress(); // creates files.tar
         }
-    } 
-} 
-fwrite(STDOUT,  ">>>>>>>>>>>>>>>>> RESTORING FINISHED! <<<<<<<<<<<<<<<<<<<<<" . PHP_EOL); 
-exit(0);
+
+        if(!file_exists($clearFolderName)){
+
+            fwrite(STDERR, "Extracting to $clearFolderName" . PHP_EOL); 
+            // unarchive from the tar
+            $phar = new PharData($clearFolderName . '.tar');
+            $phar->extractTo( $clearFolderName );   
+        }
+
+        $filename = $clearFolderName;
+
+        fwrite(STDERR, "Decompresing complete!" . PHP_EOL);
+    }
+
+    try{
+   
+        $files = scandir($filename, 1);
+        $i = 1;
+        $processes = array();
+        foreach($files as $file){
+
+            if( $file != '.' && $file != '..'  && is_dir($filename . '/' . $file) ) {
+                $allowMultiprocessing = false;
+
+                if($multiprocessing || $i < $multiprocessing){
+                     
+                    $processes[] = $pid = pcntl_fork(); 
+
+                    if(!$pid){
+                        $allowMultiprocessing = true; 
+                        $i++;
+                    }else 
+                        $pid = 0;
+
+                }else 
+                    $pid = 0;
+
+
+                if (!$pid) {
+
+                    $tempRestorer = new Restorer( 
+                        $host,
+                        $port,
+                        urldecode($file),
+                        $file,
+                        $inlineAttachment,
+                        $drop,
+                        $forceRestore,
+                        $filename . '/' . $file,
+                        $adminUsername,
+                        $adminPassword
+                    );
+                    $tempRestorer->restore();
+
+                    if($allowMultiprocessing){
+                        $i--;
+                        exit;   
+                    }    
+
+                } 
+            } 
+        } 
+
+        if($multiprocessing){
+
+            fwrite(STDERR, "Removing daemon processes!" . PHP_EOL);
+            foreach($processes as $temp){
+                pcntl_wait($temp, $status, WUNTRACED);
+            } 
+            fwrite(STDERR, "Daemon processes removed!" . PHP_EOL);
+        } 
+
+        if($deleteAfterGroupUpload){
+            fwrite(STDERR, "Removing temp folders and files.." . PHP_EOL);
+            if(file_exists(realpath($filename . '.tar'))){ 
+                unlink( realpath($filename . '.tar') ); 
+            } 
+            deleteDir( realpath($filename) ); 
+            fwrite(STDERR, "Temp folders and files removed!" . PHP_EOL);
+        }
+
+    }catch(Exception $e){
+        fwrite(STDERR, "$e" . PHP_EOL);
+    }
+ 
+}else{
+
+    $tempRestorer = new Restorer( 
+        $host,
+        $port,
+        $database,
+        $filename,
+        $inlineAttachment,
+        $drop,
+        $forceRestore,
+        $separateFiles, 
+        $adminUsername,
+        $adminPassword
+    );
+    $tempRestorer->restore(); 
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
+
+function deleteDir($dirPath) {
+    if (! is_dir($dirPath)) {
+        throw new InvalidArgumentException("$dirPath must be a directory");
+    }
+    if (substr($dirPath, strlen($dirPath) - 1, 1) != '/') {
+        $dirPath .= '/';
+    }
+    $files = glob($dirPath . '*', GLOB_MARK);
+    foreach ($files as $file) {
+        if (is_dir($file)) {
+            deleteDir($file);
+        } else {
+            unlink($file);
+        }
+    }
+    rmdir($dirPath);
+}
+
 
 function getCommonCurl($url)
 {
@@ -262,4 +521,23 @@ function parseParameters(array $params, array $reqs = array(), array $multiple =
         }
     }
     return $result;
+}
+
+
+function clearEmptyKey($input){
+
+    if(!is_array($input))
+        $input = toArray($input); 
+  
+    foreach($input as $key=>$val){
+ 
+        if(is_array($val))
+         $val = clearEmptyKey($val); 
+
+        if($key == "_empty_"){
+            $input[""] = $val;      
+            unset($input[$key]); 
+        }
+    }
+    return $input; 
 }
